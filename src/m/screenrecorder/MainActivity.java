@@ -24,6 +24,7 @@ public class MainActivity extends PreferenceActivity implements OnSharedPreferen
 	private ListPreference lpMaxFrameSize;
 	private ListPreference lpVideoQuality;
 	private EditTextPreference etpCacheFolder;
+	private ListPreference lpFrameRate;
 
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -76,6 +77,18 @@ public class MainActivity extends PreferenceActivity implements OnSharedPreferen
 		etpCacheFolder.setTitle("Cache Folder");
 		etpCacheFolder.setDialogTitle(etpCacheFolder.getTitle());
 		ps.addPreference(etpCacheFolder);
+
+		lpFrameRate = new ListPreference(this);
+		lpFrameRate.setKey("srec_key_frameRate");
+		lpFrameRate.setTitle("Frame Rate");
+		lpFrameRate.setEntries(new String[]{
+				"15",
+				"24",
+				"30"
+		});
+		lpFrameRate.setEntryValues(lpFrameRate.getEntries());
+		lpFrameRate.setDialogTitle(lpFrameRate.getTitle());
+		ps.addPreference(lpFrameRate);
 	}
 
 	@SuppressWarnings("deprecation")
@@ -106,6 +119,14 @@ public class MainActivity extends PreferenceActivity implements OnSharedPreferen
 		String cacheFolder = sp.getString(etpCacheFolder.getKey(), null);
 		etpCacheFolder.setText(TextUtils.isEmpty(cacheFolder) ? "/sdcard" : cacheFolder);
 		etpCacheFolder.setSummary(etpCacheFolder.getText());
+
+		String frameRate = sp.getString(lpFrameRate.getKey(), null);
+		if (TextUtils.isEmpty(frameRate)) {
+			lpFrameRate.setValueIndex(2);
+		} else {
+			lpFrameRate.setValue(frameRate);
+		}
+		lpFrameRate.setSummary(lpFrameRate.getValue());
 	}
 
 	@SuppressWarnings("deprecation")
@@ -140,9 +161,12 @@ public class MainActivity extends PreferenceActivity implements OnSharedPreferen
 			String maxFrameSize = lpMaxFrameSize.getValue();
 			String videoQuality = lpMaxFrameSize.getValue();
 			String cacheFolder = etpCacheFolder.getText();
-			if (recorder.start(maxFrameSize, videoQuality, cacheFolder, resultCode, data)) {
+			String frameRate = lpFrameRate.getValue();
+			if (recorder.start(maxFrameSize, videoQuality, cacheFolder, frameRate, resultCode, data)) {
 				showNotification();
 				finish();
+			} else {
+				recorder = null;
 			}
 		} else {
 			Toast.makeText(this, "User Cancelled", Toast.LENGTH_SHORT).show();

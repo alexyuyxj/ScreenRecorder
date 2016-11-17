@@ -7,25 +7,37 @@ import android.content.res.Configuration;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
-import android.media.MediaRecorder;
+import android.media.MediaCodec;
+import android.media.MediaCodec.BufferInfo;
+import android.media.MediaCodecInfo.CodecCapabilities;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
+import android.media.MediaMuxer.OutputFormat;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.view.Display;
+import android.view.Surface;
 import android.view.WindowManager;
 
 import java.io.File;
+import java.nio.ByteBuffer;
 
 public class Recorder {
 	private Activity activity;
 	private Point videoSize;
 	private float densityDpi;
 	private int bitRate;
+	private int frameRate;
 	private String videoPath;
 
 	private MediaProjectionManager mpm;
-	private MediaRecorder mr;
+	private MediaCodec encoder;
+	private Surface input;
 	private MediaProjection mp;
 	private VirtualDisplay vd;
+	private boolean started;
+	private MediaMuxer muxer;
+	private int track;
 
 	public Recorder(Activity activity) {
 		this.activity = activity;
@@ -38,13 +50,14 @@ public class Recorder {
 	}
 
 	public boolean start(String maxFrameSize, String videoQuality, String cacheFolder,
-			int resultCode, Intent data) {
+			String frameRate, int resultCode, Intent data) {
 		Point maxSize = getMaxSize(maxFrameSize);
 		Point screeSize = getScreenSize();
 		videoSize = getVideoSize(maxSize, screeSize);
 		densityDpi = activity.getResources().getDisplayMetrics().densityDpi;
 		densityDpi = (int) (densityDpi * screeSize.x / videoSize.x + 0.5f);
 		bitRate = getBitrate(maxFrameSize, videoQuality);
+		this.frameRate = Integer.parseInt(frameRate);
 		videoPath = new File(cacheFolder, System.currentTimeMillis() + ".mp4").getAbsolutePath();
 		return startRecorder(resultCode, data);
 	}
@@ -205,13 +218,17 @@ public class Recorder {
 
 	private boolean startRecorder(int resultCode, Intent data) {
 		try {
-			prepareRecorder();
+			prepareEncoder();
+			input = encoder.createInputSurface();
 			mp = mpm.getMediaProjection(resultCode, data);
 			vd = mp.createVirtualDisplay("ScreenRecorder",
 					videoSize.x, videoSize.y, (int) densityDpi,
 					DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-					mr.getSurface(), null, null);
-			mr.start();
+					input, null, null);
+			encoder.start();
+
+			started = true;
+			startEncoder();
 			return true;
 		} catch (Throwable t) {
 			t.printStackTrace();
@@ -220,24 +237,60 @@ public class Recorder {
 		return false;
 	}
 
-	private void prepareRecorder() throws Throwable {
-		mr = new MediaRecorder();
-		mr.setAudioSource(MediaRecorder.AudioSource.MIC);
-		mr.setVideoSource(MediaRecorder.VideoSource.SURFACE);
-		mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-		mr.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
-		mr.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-		mr.setVideoEncodingBitRate(bitRate);
-		mr.setVideoFrameRate(30);
-		mr.setVideoSize(videoSize.x, videoSize.y);
-		mr.setOutputFile(videoPath);
-		mr.prepare();
+	private void prepareEncoder() throws Throwable {
+		MediaFormat format = MediaFormat.createVideoFormat("video/avc", videoSize.x, videoSize.y);
+		format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
+		format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate);
+		format.setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatSurface);
+		format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+		encoder = MediaCodec.createEncoderByType("video/avc");
+		encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+	}
+
+	private void startEncoder() {
+		new Thread() {
+			public void run() {
+				BufferInfo info = new BufferInfo();
+				while (started) {
+					encodeFrame(info);
+				}
+				afterLastFrame();
+			}
+		}.start();
+	}
+
+	private void encodeFrame(BufferInfo info) {
+		try {
+			int encoderStatus = encoder.dequeueOutputBuffer(info, 0);
+			if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+				MediaFormat format = encoder.getOutputFormat();
+				muxer = new MediaMuxer(videoPath, OutputFormat.MUXER_OUTPUT_MPEG_4);
+				track = muxer.addTrack(format);
+				muxer.start();
+			} else if (encoderStatus > 0) {
+				ByteBuffer encodedData = encoder.getOutputBuffer(encoderStatus);
+				if (encodedData != null) {
+					if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+						encodedData.position(info.offset);
+						encodedData.limit(info.offset + info.size);
+						muxer.writeSampleData(track, encodedData, info);
+					}
+					encoder.releaseOutputBuffer(encoderStatus, false);
+				}
+			}
+		} catch (Throwable t) {
+			t.printStackTrace();
+		}
 	}
 
 	public void stop() {
-		if (mr != null) {
+		started = false;
+	}
+
+	private void afterLastFrame() {
+		if (encoder != null) {
 			try {
-				mr.stop();
+				encoder.stop();
 			} catch (Throwable t) {
 				t.printStackTrace();
 			}
@@ -252,13 +305,32 @@ public class Recorder {
 			vd = null;
 		}
 
-		if (mr != null) {
+		if (input != null) {
 			try {
-				mr.release();
+				input.release();
 			} catch (Throwable t) {
 				t.printStackTrace();
 			}
-			mr = null;
+			input = null;
+		}
+
+		if (encoder != null) {
+			try {
+				encoder.release();
+			} catch (Throwable t) {
+				t.printStackTrace();
+			}
+			encoder = null;
+		}
+
+		if (muxer != null) {
+			try {
+				muxer.stop();
+				muxer.release();
+			} catch (Throwable t) {
+				t.printStackTrace();
+			}
+			muxer = null;
 		}
 
 		if (mp != null) {
