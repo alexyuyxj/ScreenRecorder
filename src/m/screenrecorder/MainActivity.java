@@ -159,7 +159,7 @@ public class MainActivity extends PreferenceActivity implements OnSharedPreferen
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		if (resultCode == Activity.RESULT_OK) {
 			String maxFrameSize = lpMaxFrameSize.getValue();
-			String videoQuality = lpMaxFrameSize.getValue();
+			String videoQuality = lpVideoQuality.getValue();
 			String cacheFolder = etpCacheFolder.getText();
 			String frameRate = lpFrameRate.getValue();
 			if (recorder.start(maxFrameSize, videoQuality, cacheFolder, frameRate, resultCode, data)) {
@@ -174,15 +174,18 @@ public class MainActivity extends PreferenceActivity implements OnSharedPreferen
 	}
 
 	private void showNotification() {
-		String title = getString(R.string.app_name);
-		Notification not = new Notification(R.drawable.ic_launcher, title, System.currentTimeMillis());
-		not.flags = Notification.FLAG_NO_CLEAR;
-		NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+		Notification.Builder builder = new Notification.Builder(this);
+		builder.setContentTitle(getString(R.string.app_name));
+		builder.setContentText("Click to Stop");
+		builder.setSmallIcon(R.drawable.ic_launcher);
 		Intent i = new Intent();
 		i.setComponent(new ComponentName(getPackageName(), getClass().getName()));
 		i.putExtra("STOP_RECORDER", true);
-		PendingIntent pi = PendingIntent.getActivity(getApplicationContext(), 0, i, 0);
-		not.setLatestEventInfo(getApplicationContext(), title, "Click to Stop", pi);
+		builder.setContentIntent(PendingIntent.getActivity(getApplicationContext(), 0, i, 0));
+		builder.setWhen(System.currentTimeMillis());
+		Notification not = builder.build();
+		not.flags = Notification.FLAG_NO_CLEAR;
+		NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
 		nm.notify(0, not);
 	}
 
